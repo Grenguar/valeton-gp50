@@ -1,13 +1,11 @@
-# GP-50 Converter
+# Valeton GP-50 Editor
 
-**Live demo:** [valeton-gp50-woad.vercel.app](https://valeton-gp50-woad.vercel.app) — zero-setup,
-runs in-browser (WebMIDI), no local install needed. See [Setup](#setup) below for the full
-local app with the batch converter.
+A browser-based editor for the **Valeton GP-50** (and GP-5), built by reverse-engineering
+the pedal's MIDI SysEx protocol from scratch. It reads and writes the device live over
+**WebMIDI** — no vendor SDK, no drivers, no backend.
 
-A companion app for the **Valeton GP-50** (and GP-5) built by reverse-engineering its
-MIDI SysEx protocol from scratch. It reads and writes the pedal live over **WebMIDI**
-— no vendor SDK, no drivers — plus batch-converts NAM **A2** captures to NAM **A1**
-`.nam` files, since the GP-50 only accepts A1.
+**Live demo:** [valeton-gp50-woad.vercel.app](https://valeton-gp50-woad.vercel.app) —
+zero-setup, runs entirely in-browser. Chrome or Edge, pedal on USB.
 
 **What it does:**
 
@@ -31,20 +29,25 @@ MIDI SysEx protocol from scratch. It reads and writes the pedal live over **WebM
   template.
 - **Preset Converter** — convert `.prst` preset files between the GP-5 and GP-50
   formats, entirely client-side.
-- **NAM A2→A1 batch converter** — drag-drop one or more `.nam` A2 captures, pick an
-  output format, and convert with live per-file progress (local app only, needs the
-  Python distillation engine — see below).
 
-> The GP-50 only accepts NAM A1. There's no A2→A1 format downgrade (different neural
-> architectures), so conversion **distills**: render a DI through the A2 model, then
-> train an A1 to reproduce it. See [`a2a1/README.md`](a2a1/README.md) for the engine
-> details.
+Everything above runs client-side. The live demo is the whole app; the local FastAPI
+server ([Setup](#setup)) is only for development and for the legacy in-repo NAM
+converter.
 
-Two ways to run it:
-- **Static/WebMIDI-only** (the live demo above) — Explorer, live editing, Captures &
-  IRs, and the Preset Converter all run fully client-side, no backend.
-- **Full local app** (Setup below) — adds the NAM batch converter, which needs the
-  Python distillation engine.
+## Getting NAM captures onto the pedal
+
+**That moved to its own project:
+[nam-a2a1-converter](https://github.com/drewmerc302/nam-a2a1-converter)** — a standalone
+desktop app (Windows / macOS / Linux, optional NVIDIA acceleration).
+**[Download a release →](https://github.com/drewmerc302/nam-a2a1-converter/releases)**
+
+The GP-50 only accepts NAM **A1**, and there's no A2→A1 format downgrade — they're
+different neural architectures, so the weights don't transfer. The converter **distills**
+instead: render a DI through the A2 model, then train an A1 to reproduce that output.
+It's device-agnostic, so it serves any A1-only device or plugin, not just the GP-50.
+
+This repo still carries the engine it grew out of (`a2a1/`, wired into the local app),
+but the converter you actually want is the standalone one.
 
 ## Screenshots
 
@@ -57,21 +60,29 @@ Two ways to run it:
 
 ## Setup
 
-Two Python venvs (the engine now runs entirely in one 0.13.0 venv — see
-`a2a1/README.md` for why the old second venv is gone):
+You don't need any of this to use the app — open the
+[live demo](https://valeton-gp50-woad.vercel.app). Local setup is for development.
 
 ```bash
 cd /Users/drewmerc/workspace/valeton
-
-# engine venv (A2 render + train + 0.7.0 export; 0.5.x via in-process transcode)
-python3 -m venv .venv     && ./.venv/bin/python     -m pip install -r a2a1/requirements-a2.txt   # NAM 0.13.0
 
 # web app venv
 python3 -m venv .venv-app && ./.venv-app/bin/python -m pip install fastapi "uvicorn[standard]" python-multipart pytest httpx
 ```
 
-The default DI is `refs/v3_0_0.wav` (official NAM input). Get it via the trainer, or
-generate a synthetic fallback: `./.venv/bin/python a2a1/make_di.py refs/v3_0_0.wav`.
+<details>
+<summary>Optional: the in-repo NAM engine (superseded by <a href="https://github.com/drewmerc302/nam-a2a1-converter">nam-a2a1-converter</a>)</summary>
+
+```bash
+# engine venv (A2 render + train + 0.7.0 export; 0.5.x via in-process transcode)
+python3 -m venv .venv && ./.venv/bin/python -m pip install -r a2a1/requirements-a2.txt   # NAM 0.13.0
+```
+
+One venv, not two — see [`a2a1/README.md`](a2a1/README.md) for why the old second one
+is gone. The default DI is `refs/v3_0_0.wav` (official NAM input). Get it via the
+trainer, or generate a synthetic fallback:
+`./.venv/bin/python a2a1/make_di.py refs/v3_0_0.wav`.
+</details>
 
 ## Run
 
@@ -81,13 +92,12 @@ generate a synthetic fallback: `./.venv/bin/python a2a1/make_di.py refs/v3_0_0.w
 
 Then open **http://127.0.0.1:8756**.
 
-- **Convert:** drag-drop or pick `.nam` files → choose output format (**0.5.x** for the
-  GP-50, or **0.7.0** for newer devices) → set epochs (or hit **Fast (test)**) →
-  **Convert**. Watch per-file progress (ESR + format check); download each result.
-  Then import the `.nam` into Valeton Suite like any A1 capture.
 - **Preset Explorer / Captures & IRs:** connect the pedal over WebMIDI (Chrome/Edge,
   HTTPS or localhost), scan, and browse/edit real device data live — see the
   itemized feature list above.
+- **Preset Converter:** drop in a `.prst` and convert between GP-5 and GP-50 formats.
+- **NAM converter:** present in the local build only, and only with the engine venv
+  above. The hosted build links to the standalone converter instead.
 
 ## Tests
 
@@ -98,8 +108,11 @@ Then open **http://127.0.0.1:8756**.
 
 ## Layout
 
-- `app/` — the FastAPI web app (engine wrapper, job API, static frontend, device stub).
-- `a2a1/` — the conversion engine + GP-50 MIDI RE tooling ([README](a2a1/README.md)).
+- `app/` — the FastAPI web app + the WebMIDI frontend (device I/O, decoders, editor UI).
+- `a2a1/` — GP-50 MIDI RE tooling, plus the original A2→A1 engine
+  ([README](a2a1/README.md)); the shipped converter now lives in
+  [nam-a2a1-converter](https://github.com/drewmerc302/nam-a2a1-converter).
+- `docs/`, `re/`, `design/` — protocol notes, RE captures, and format research.
 - `refs/` — sample models + the DI input.
 - `MVP_REQUIREMENTS.md`, `AUTONOMY.md`, `STATUS.md` — the MVP spec, the build-loop
   protocol, and live build status.
