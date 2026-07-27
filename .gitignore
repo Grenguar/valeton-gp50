@@ -45,3 +45,7 @@ NAM_Files/
 # static site build output
 dist/
 /dist
+
+# graphify knowledge-graph output (regenerable, rebuilt on branch switch)
+graphify-out/
+.ruff_cache/
