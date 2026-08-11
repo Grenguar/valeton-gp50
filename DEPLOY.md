@@ -95,3 +95,48 @@ npx wrangler pages deploy dist/ --project-name valeton-beta
 
 Everything above the deploy step is already built and validated; only the host/auth
 choice remains.
+
+## AI patch generation — backend on ECS/Fargate + ALB (CloudFormation)
+
+The "Create/Improve patch with AI" feature calls **AWS Bedrock (Haiku 4.5)** from the
+Python backend, so it can't run on the static Cloudflare/Vercel host — it needs a running
+server with AWS credentials. The container backend is self-sufficient: inventory falls
+back to the committed factory snapshot (`app/static/data/presets.json`), and device writes
+stay in the browser over WebMIDI (the server has no pedal). The AI endpoint is the only
+thing that needs the backend.
+
+Prereqs (once per account): enable **Haiku 4.5** in Bedrock → Model access for the region;
+have a VPC with ≥2 public subnets and an **ACM cert** for your domain (WebMIDI needs HTTPS).
+
+```bash
+PROFILE=igor
+REGION=us-east-1
+ACCOUNT=$(aws sts get-caller-identity --profile $PROFILE --query Account --output text)
+REPO=$ACCOUNT.dkr.ecr.$REGION.amazonaws.com/valeton-ai
+
+# 1. build + push the image to ECR
+aws ecr create-repository --repository-name valeton-ai --profile $PROFILE --region $REGION 2>/dev/null || true
+aws ecr get-login-password --profile $PROFILE --region $REGION | docker login --username AWS --password-stdin $ACCOUNT.dkr.ecr.$REGION.amazonaws.com
+docker build --platform linux/amd64 -t $REPO:latest .
+docker push $REPO:latest
+
+# 2. deploy the stack (ECS/Fargate + ALB + IAM bedrock:InvokeModel task role)
+aws cloudformation deploy \
+  --template-file deploy/valeton-ai.cfn.yaml \
+  --stack-name valeton-ai \
+  --capabilities CAPABILITY_IAM \
+  --profile $PROFILE --region $REGION \
+  --parameter-overrides \
+    VpcId=vpc-XXXX \
+    PublicSubnetIds=subnet-AAAA,subnet-BBBB \
+    CertificateArn=arn:aws:acm:$REGION:$ACCOUNT:certificate/XXXX \
+    ImageUri=$REPO:latest
+
+# 3. grab the ALB URL, point DNS/CNAME at it, open over HTTPS in Chrome/Edge
+aws cloudformation describe-stacks --stack-name valeton-ai --profile $PROFILE --region $REGION \
+  --query "Stacks[0].Outputs[?OutputKey=='AlbUrl'].OutputValue" --output text
+```
+
+Confirm the exact Haiku 4.5 model/inference-profile id for the account with
+`aws bedrock list-inference-profiles --profile $PROFILE --region $REGION`; override via the
+`BedrockModelId` parameter (or the `BEDROCK_MODEL_ID` env var) if it differs from the default.
