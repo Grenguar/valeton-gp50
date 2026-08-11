@@ -14,6 +14,9 @@ RUN pip install -r requirements-app.txt
 # product code + the bundled catalog/snapshot data
 COPY app ./app
 COPY patch ./patch
+# app.engine imports a2a1.distill_protocol at boot (stdlib-only stdout contract);
+# the converter itself is local-only, so only these two files are needed to run.
+COPY a2a1/__init__.py a2a1/distill_protocol.py ./a2a1/
 
 EXPOSE 8756
 # ALB health check hits GET /health

@@ -103,26 +103,32 @@ def _all_fxid_params() -> dict:
 
 
 def catalog_context() -> str:
-    """Compact per-block catalog the model chooses from — one line per model:
-    `fxid  Name [Type] (origin) :: algId=Param(min-max) ...`."""
+    """Compact per-block catalog the model chooses from, grouped by tonal type so
+    it picks musically (e.g. MOD → Chorus / Flanger / Phaser). One line per model:
+    `fxid  Name (origin) :: algId=Param(min-max) ...` under a `# Type` heading."""
     allowed, _ = _fxid_index()
     lines = []
     for idx, block in enumerate(BLOCK_NAMES):
         if idx not in allowed:
             continue
         lines.append(f"## block {idx} = {block}")
+        by_type: dict[str, list] = {}
         for m in patchlib.models_for_block(block):
             if m["fxid"] not in allowed[idx]:
                 continue
-            ps = " ".join(
-                f"{p['algId']}={p['name']}({p.get('min', 0)}-{p.get('max', 100)}"
-                + ("/toggle" if p.get("toggle") else "")
-                + ")"
-                for p in (m.get("params") or [])
-            )
-            origin = f" ({m['official']})" if m.get("official") else ""
-            typ = f" [{m['type']}]" if m.get("type") else ""
-            lines.append(f"{m['fxid']}  {m['name']}{typ}{origin} :: {ps}")
+            by_type.setdefault(m.get("type") or "", []).append(m)
+        for typ in sorted(by_type):
+            if typ:
+                lines.append(f"# {typ}")
+            for m in by_type[typ]:
+                ps = " ".join(
+                    f"{p['algId']}={p['name']}({p.get('min', 0)}-{p.get('max', 100)}"
+                    + ("/toggle" if p.get("toggle") else "")
+                    + ")"
+                    for p in (m.get("params") or [])
+                )
+                origin = f" ({m['official']})" if m.get("official") else ""
+                lines.append(f"{m['fxid']}  {m['name']}{origin} :: {ps}")
     return "\n".join(lines)
 
 
@@ -216,30 +222,49 @@ Call the emit_patch tool exactly once with the complete edit. Keep it musical an
 # ── the Bedrock call (isolated so tests can stub it) ─────────────────────────
 
 
-def _call_bedrock(system_text: str, user_text: str) -> dict:
-    """Invoke Haiku 4.5 via the Bedrock Converse API with a forced tool choice,
-    and return the raw emit_patch tool input. Isolated so tests stub this."""
+def _call_bedrock(system_text: str, catalog: str, user_text: str) -> dict:
+    """Invoke Haiku 4.5 via the Bedrock Converse API with a forced tool choice, and
+    return the raw emit_patch tool input. The static system prompt + catalog go in a
+    cached `system` block (a Bedrock cachePoint) — identical every call for a device,
+    so it's served from cache; only `user_text` (the request) varies. Falls back to
+    an uncached call if the region/model rejects cachePoint. Isolated so tests stub."""
     import boto3
+    from botocore.exceptions import ClientError
 
     client = boto3.client("bedrock-runtime", region_name=_region())
-    resp = client.converse(
-        modelId=model_id(),
-        system=[{"text": system_text}],
-        messages=[{"role": "user", "content": [{"text": user_text}]}],
-        toolConfig={
-            "tools": [
-                {
-                    "toolSpec": {
-                        "name": "emit_patch",
-                        "description": "Emit the complete patch edit spec.",
-                        "inputSchema": {"json": EDIT_TOOL_SCHEMA},
-                    }
-                }
-            ],
-            "toolChoice": {"tool": {"name": "emit_patch"}},
-        },
-        inferenceConfig={"maxTokens": 2048, "temperature": 0.7},
+    full_system = (
+        f"{system_text}\n\nAvailable models per block "
+        f"(fxid  Name (origin) :: algId=Param(min-max)), grouped by type:\n{catalog}"
     )
+    tool_config = {
+        "tools": [
+            {
+                "toolSpec": {
+                    "name": "emit_patch",
+                    "description": "Emit the complete patch edit spec.",
+                    "inputSchema": {"json": EDIT_TOOL_SCHEMA},
+                }
+            }
+        ],
+        "toolChoice": {"tool": {"name": "emit_patch"}},
+    }
+
+    def _invoke(system_blocks):
+        return client.converse(
+            modelId=model_id(),
+            system=system_blocks,
+            messages=[{"role": "user", "content": [{"text": user_text}]}],
+            toolConfig=tool_config,
+            inferenceConfig={"maxTokens": 2048, "temperature": 0.7},
+        )
+
+    try:
+        resp = _invoke([{"text": full_system}, {"cachePoint": {"type": "default"}}])
+    except ClientError as e:
+        if "cache" in str(e).lower():  # region/model without prompt caching
+            resp = _invoke([{"text": full_system}])
+        else:
+            raise
     for block in resp["output"]["message"]["content"]:
         if "toolUse" in block and block["toolUse"]["name"] == "emit_patch":
             return block["toolUse"]["input"]
@@ -249,17 +274,19 @@ def _call_bedrock(system_text: str, user_text: str) -> dict:
 def generate_patch_edits(prompt: str, *, mode: str, patch: dict) -> dict:
     """Build the request, call Bedrock, and return the raw (unvalidated) edit spec.
     `patch` is the base patch dict (from patchlib inventory) — its blocks are the
-    current tone, used as context in 'improve' mode."""
-    parts = [
-        "Available models per block (fxid  Name [Type] (origin) :: algId=Param(min-max)):",
-        catalog_context(),
-    ]
+    current tone, used as context in 'improve' mode. The catalog rides in the cached
+    system block; only this user text varies per request."""
     if mode == "improve":
-        parts += ["\nThe patch as it is now (modify it):", _current_patch_context(patch)]
-        parts += [f"\nUser request: {prompt}\nReturn only the blocks/params you change."]
+        user = "\n".join(
+            [
+                "The patch as it is now (modify it):",
+                _current_patch_context(patch),
+                f"\nUser request: {prompt}\nReturn only the blocks/params you change.",
+            ]
+        )
     else:
-        parts += [f"\nDesign a new patch from scratch for this request: {prompt}"]
-    return _call_bedrock(_SYSTEM, "\n".join(parts))
+        user = f"Design a new patch from scratch for this request: {prompt}"
+    return _call_bedrock(_SYSTEM, catalog_context(), user)
 
 
 # ── the guardrail: validate + clamp against the catalog ──────────────────────
