@@ -355,6 +355,14 @@ def validate_edits(raw: dict, *, base_blocks: list, base_order: list) -> tuple[d
     bypass = {int(k): bool(v) for k, v in _to_int_map(raw.get("bypass")).items()}
     # never let the AI toggle the SnapTone core block on/off
     bypass.pop(_NS_INDEX, None)
+    # Any block the AI configured — gave a model or set params on — is meant to be
+    # in the chain, so enable it unless the model *explicitly* bypassed it. Haiku
+    # reliably picks models/params but often forgets to emit a complete bypass map;
+    # without this, freshly-designed blocks (amp, cab, drive…) inherit the base
+    # patch's OFF state and the generated tone renders mostly bypassed.
+    for blk in set(models) | set(params):
+        if blk != _NS_INDEX and blk not in bypass:
+            bypass[blk] = True
     if bypass:
         clean["bypass"] = bypass
 

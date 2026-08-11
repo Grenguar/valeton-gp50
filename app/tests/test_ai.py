@@ -186,6 +186,46 @@ def test_validate_clamps_param_and_drops_unknown_algid(gp5):
     assert any("not on its model" in w for w in warns)
 
 
+def test_validate_enables_configured_blocks_without_explicit_bypass(gp5):
+    """A block the AI models/params must be turned ON even if the model forgot to
+    emit bypass — otherwise a freshly designed tone renders mostly bypassed."""
+    p = _a_patch()
+    fxid, alg, _ = _dst_choice()
+    clean, _ = ai.validate_edits(
+        {"models": {"2": fxid}, "params": {"5": {str(alg): 5}}},  # no bypass at all
+        base_blocks=p["blocks"],
+        base_order=p.get("order") or [],
+    )
+    assert clean["bypass"][2] is True  # modeled block enabled
+    assert clean["bypass"][5] is True  # param-only block enabled
+
+
+def test_validate_respects_explicit_bypass_false(gp5):
+    """An explicit bypass=false wins over the auto-enable (AI can still turn a
+    configured block off, e.g. 'add a delay but leave it off')."""
+    p = _a_patch()
+    fxid, _, _ = _dst_choice()
+    clean, _ = ai.validate_edits(
+        {"models": {"2": fxid}, "bypass": {"2": False}},
+        base_blocks=p["blocks"],
+        base_order=p.get("order") or [],
+    )
+    assert clean["bypass"][2] is False
+
+
+def test_validate_never_enables_snaptone_core(gp5):
+    """N->S is device-controlled; auto-enable must never touch it even if the AI
+    (wrongly) sent params for it."""
+    p = _a_patch()
+    ns = ai._NS_INDEX
+    clean, _ = ai.validate_edits(
+        {"params": {str(ns): {"1": 5}}},
+        base_blocks=p["blocks"],
+        base_order=p.get("order") or [],
+    )
+    assert ns not in clean.get("bypass", {})
+
+
 def test_validate_clamps_vol_and_drops_bad_bpm(gp5):
     p = _a_patch()
     clean, _ = ai.validate_edits(
