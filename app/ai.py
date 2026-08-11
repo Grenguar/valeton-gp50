@@ -18,13 +18,12 @@ the standard boto3 chain (env / profile / ECS task role) — no keys in code.
 
 from __future__ import annotations
 
-import json
 import os
 from functools import lru_cache
 from typing import Optional
 
 from app import patchlib
-from app.patchlib import BLOCK_NAMES, MOVABLE_BLOCKS, NS_CAT, USER_IR_BASE
+from app.patchlib import BLOCK_NAMES, MOVABLE_BLOCKS, USER_IR_BASE
 
 # Haiku 4.5 on Bedrock is invoked via a cross-region inference profile. Confirm
 # the exact id for the target account with `aws bedrock list-inference-profiles`.
@@ -341,8 +340,12 @@ def validate_edits(raw: dict, *, base_blocks: list, base_order: list) -> tuple[d
             if alg not in defs:
                 warnings.append(f"block {blk}: algId {alg} not on its model — dropped")
                 continue
-            lo, hi, _ = defs[alg]
+            lo, hi, toggle = defs[alg]
             cval = max(lo, min(hi, val))
+            # toggles are booleans on the device — snap to 0/1 so a stray 0.5 can't
+            # be written as a nonsense float param.
+            if toggle:
+                cval = 1.0 if round(cval) else 0.0
             if cval != val:
                 warnings.append(f"block {blk} param {alg}: {val} clamped to {cval}")
             kept[alg] = cval

@@ -44,6 +44,16 @@ def _dst_choice():
     return m["fxid"], m["params"][0]["algId"], m["params"][0]
 
 
+def _toggle_choice():
+    """Any (block_index, fxid, algId) whose param is a toggle, from the live gp5 ring."""
+    for idx, block in enumerate(patchlib.BLOCK_NAMES):
+        for m in patchlib.models_for_block(block):
+            for p in m.get("params") or []:
+                if p.get("toggle"):
+                    return idx, m["fxid"], p["algId"]
+    return None
+
+
 # ── status endpoint ──────────────────────────────────────────────────────────
 
 
@@ -224,6 +234,22 @@ def test_validate_never_enables_snaptone_core(gp5):
         base_order=p.get("order") or [],
     )
     assert ns not in clean.get("bypass", {})
+
+
+def test_validate_snaps_toggle_param_to_0_or_1(gp5):
+    """A toggle param is a device boolean — a fractional value must snap to 0/1,
+    not pass through clamped-but-fractional (it's written as a raw float byte)."""
+    choice = _toggle_choice()
+    if choice is None:
+        pytest.skip("no toggle params in the gp5 ring")
+    idx, fxid, alg = choice
+    p = _a_patch()
+    clean, _ = ai.validate_edits(
+        {"models": {str(idx): fxid}, "params": {str(idx): {str(alg): 0.5}}},
+        base_blocks=p["blocks"],
+        base_order=p.get("order") or [],
+    )
+    assert clean["params"][idx][alg] in (0.0, 1.0)
 
 
 def test_validate_clamps_vol_and_drops_bad_bpm(gp5):
