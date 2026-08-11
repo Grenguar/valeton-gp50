@@ -76,6 +76,10 @@ Resources:
                 Value: !Ref AWS::Region
               - Name: BEDROCK_MODEL_ID
                 Value: !Ref BedrockModelId
+              # no pedal on the server — device I/O runs in the browser (WebMIDI);
+              # only /api/device/ai/* and the converter hit this backend
+              - Name: DEVICE_IO_MODE
+                Value: browser
       InstanceConfiguration:
         Cpu: "0.25 vCPU"
         Memory: "0.5 GB"

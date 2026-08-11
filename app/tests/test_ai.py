@@ -47,6 +47,23 @@ def _dst_choice():
 # ── status endpoint ──────────────────────────────────────────────────────────
 
 
+def test_hybrid_browser_device_io_injects_static_flag(monkeypatch):
+    """DEVICE_IO_MODE=browser serves the Explorer/Device pages with the static flag
+    (so device I/O runs in-browser over WebMIDI), while /api/device/ai/* and the
+    converter landing stay on the backend."""
+    monkeypatch.setenv("DEVICE_IO_MODE", "browser")
+    assert "__VALETON_STATIC__" in client.get("/explorer").text
+    assert "__VALETON_STATIC__" in client.get("/device").text
+    assert "__VALETON_STATIC__" not in client.get("/").text  # converter is backend-only
+    # AI status is a real endpoint, never intercepted by static_api
+    assert client.get("/api/device/ai/status").status_code == 200
+
+
+def test_server_device_io_no_static_flag(monkeypatch):
+    monkeypatch.delenv("DEVICE_IO_MODE", raising=False)
+    assert "__VALETON_STATIC__" not in client.get("/explorer").text
+
+
 def test_ai_status_unavailable_without_region(monkeypatch):
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
