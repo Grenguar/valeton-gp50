@@ -124,6 +124,14 @@
     }
     if (path === "/api/device/facets") return J(store.lib.facets(inventory().patches));
 
+    // AI patch generation is backend-only (needs AWS Bedrock). In the zero-backend
+    // build, report unavailable so the Explorer hides the AI buttons, and return a
+    // clear message rather than the raw 404 fallback if /ai/patch is ever hit.
+    if (path === "/api/device/ai/status") return J({ available: false, model_id: null });
+    if (path === "/api/device/ai/patch") {
+      return J({ detail: "AI patch generation needs the backend server (not available in the static build)." }, 501);
+    }
+
     let m;
     if ((m = path.match(/^\/api\/device\/models\/(.+)$/))) {
       const block = decodeURIComponent(m[1]);
