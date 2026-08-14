@@ -142,7 +142,12 @@ aws cloudformation describe-stacks --stack-name valeton-ai --profile $PROFILE --
 
 Redeploying a new image: `docker build/push` the same tag, then either set
 `AutoDeploy=true` in the stack, or run `aws apprunner start-deployment --service-arn <arn>
---profile $PROFILE`.
+--profile $PROFILE`. Note: a `cloudformation deploy` that only changes env/params does **not**
+re-pull an unchanged `:latest` tag — App Runner reuses the cached image. After any image push,
+force a fresh pull with `start-deployment` (or `AutoDeploy=true`).
+
+> zsh gotcha: quote image tags as `"${REPO}:latest"` — unquoted `$REPO:latest` triggers zsh's
+> `:l` modifier and mangles the tag (`valeton-ai` → `valeton-aiatest`).
 
 Confirm the exact Haiku 4.5 model/inference-profile id for the account with
 `aws bedrock list-inference-profiles --profile $PROFILE --region $REGION`; override via the
