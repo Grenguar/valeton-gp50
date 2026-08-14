@@ -7,6 +7,9 @@
 # install -r requirements-app.txt).
 # AI patch generation needs AWS_REGION + credentials (boto3 chain) — e.g.:
 #   AWS_REGION=us-east-1 AWS_PROFILE=igor ./run.sh
+# Set APP_AUTH_PASSWORD to gate the whole app behind HTTP Basic (as on the hosted
+# backend); leave it unset for open local dev. Username defaults to "valeton":
+#   APP_AUTH_PASSWORD='a-long-random-secret' ./run.sh
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 source .venv-app/bin/activate

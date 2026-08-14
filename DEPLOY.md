@@ -122,15 +122,20 @@ aws ecr get-login-password --profile $PROFILE --region $REGION | docker login --
 docker build --platform linux/amd64 -t $REPO:latest .
 docker push $REPO:latest
 
-# 2. deploy the App Runner service (+ instance role scoped to bedrock:InvokeModel)
+# 2. deploy the App Runner service (+ instance role scoped to bedrock:InvokeModel).
+#    AppPassword gates the whole app behind HTTP Basic (protects the paid Bedrock
+#    endpoint); pick a long random value — min 12 chars.
+APP_PASSWORD=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+echo "app password: $APP_PASSWORD"   # save this — needed to open the site
 aws cloudformation deploy \
   --template-file deploy/valeton-ai.apprunner.cfn.yaml \
   --stack-name valeton-ai \
   --capabilities CAPABILITY_IAM \
   --profile $PROFILE --region $REGION \
-  --parameter-overrides ImageUri=$REPO:latest
+  --parameter-overrides ImageUri=$REPO:latest AppPassword="$APP_PASSWORD"
 
-# 3. grab the HTTPS URL and open it in Chrome/Edge (grant WebMIDI SysEx once)
+# 3. grab the HTTPS URL and open it in Chrome/Edge — the browser prompts for the
+#    username (default "valeton") + AppPassword once, then remembers it. Grant WebMIDI SysEx once.
 aws cloudformation describe-stacks --stack-name valeton-ai --profile $PROFILE --region $REGION \
   --query "Stacks[0].Outputs[?OutputKey=='ServiceUrl'].OutputValue" --output text
 ```
@@ -143,7 +148,15 @@ Confirm the exact Haiku 4.5 model/inference-profile id for the account with
 `aws bedrock list-inference-profiles --profile $PROFILE --region $REGION`; override via the
 `BedrockModelId` parameter (or the `BEDROCK_MODEL_ID` env var) if it differs from the default.
 
+**Access control:** the backend gates every route behind HTTP Basic Auth when
+`APP_AUTH_PASSWORD` is set (the templates wire it from the `AppPassword` parameter). This
+protects the paid Bedrock endpoint and the pages alike — the browser sends the credentials
+on every same-origin request, so the in-page AI calls are covered too. `/health` stays open
+for infra checks. Username defaults to `valeton` (override with `AppUsername`). To rotate,
+re-deploy with a new `AppPassword`. Unset the var (local dev / the public static Vercel
+build) and the gate is a no-op.
+
 **Custom domain / ALB alternative:** `deploy/valeton-ai.cfn.yaml` is a validated ECS/Fargate
 + HTTPS-ALB stack for when you need a VPC-scoped deployment or a custom domain with an ACM
-cert (pass `VpcId`, `PublicSubnetIds`, `CertificateArn`, `ImageUri`). App Runner is the
-simpler/cheaper default; use the ALB stack only if you specifically need it.
+cert (pass `VpcId`, `PublicSubnetIds`, `CertificateArn`, `ImageUri`, `AppPassword`). App Runner
+is the simpler/cheaper default; use the ALB stack only if you specifically need it.

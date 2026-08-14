@@ -9,9 +9,10 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from app import auth
 from app.api import router as api_router
 from app.api_device import router as device_api_router
 
@@ -52,6 +53,19 @@ async def no_cache_static(request, call_next):
     if request.url.path.startswith("/static"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+@app.middleware("http")
+async def basic_auth_gate(request, call_next):
+    """Gate the whole app behind HTTP Basic when APP_AUTH_PASSWORD is set (the
+    hosted backend); a no-op when it isn't (local dev / static build). /health is
+    always open so infra health checks pass. Registered last → runs outermost, so
+    an unauthorized request is rejected before any handler work."""
+    expected = auth.credentials()
+    if expected and request.url.path not in auth.OPEN_PATHS:
+        if not auth.check_header(request.headers.get("authorization"), expected):
+            return Response(status_code=401, headers=auth.challenge_headers())
+    return await call_next(request)
 
 
 router = APIRouter()

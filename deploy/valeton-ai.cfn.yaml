@@ -24,6 +24,17 @@ Parameters:
   DesiredCount:
     Type: Number
     Default: 1
+  AppPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    Description: >
+      HTTP Basic Auth password gating the whole app (pages + the Bedrock AI
+      endpoint). Required — pick a long, random value. Min 12 chars.
+  AppUsername:
+    Type: String
+    Default: valeton
+    Description: HTTP Basic Auth username (paired with AppPassword).
 
 Resources:
   LogGroup:
@@ -151,6 +162,12 @@ Resources:
               Value: !Ref AWS::Region
             - Name: BEDROCK_MODEL_ID
               Value: !Ref BedrockModelId
+            # HTTP Basic Auth gate over the whole app (protects the Bedrock endpoint).
+            # /health is exempt so the ALB target stays healthy.
+            - Name: APP_AUTH_USER
+              Value: !Ref AppUsername
+            - Name: APP_AUTH_PASSWORD
+              Value: !Ref AppPassword
           LogConfiguration:
             LogDriver: awslogs
             Options:
